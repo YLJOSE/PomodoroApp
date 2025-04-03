@@ -1,74 +1,211 @@
-import { Image, StyleSheet, Platform } from 'react-native';
+import React, { useState, useEffect } from "react";
+import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Notifications from "expo-notifications";
+import { Audio } from "expo-av";
+import Animated, { useAnimatedStyle, withTiming } from "react-native-reanimated";
 
-import { HelloWave } from '@/components/HelloWave';
-import ParallaxScrollView from '@/components/ParallaxScrollView';
-import { ThemedText } from '@/components/ThemedText';
-import { ThemedView } from '@/components/ThemedView';
+// configuracion de notificaciones
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: false,// para el sonido de notificacion
+    shouldSetBadge: false,
+  }),
+});
 
-export default function HomeScreen() {
+// Duración de los tiempos (en segundos)
+const WORK_TIME = 25 * 60; // editar tiempo de trabajo
+const BREAK_TIME = 5 * 60; // editar tiempo de descanso
+
+export default function PomodoroClock() {
+  const [timeLeft, setTimeLeft] = useState(WORK_TIME);
+  const [isRunning, setIsRunning] = useState(false);
+  const [isWorkSession, setIsWorkSession] = useState(true); // true = trabaj ; false = desacanso
+  const [sessionsCompleted, setSessionsCompleted] = useState(0);
+  const [breaksTaken, setBreaksTaken] = useState(0);
+  const [bgColor, setBgColor] = useState("#f4f4f4");
+
+  //cargar progreso y pedir permiso para notificaciones
+  useEffect(() => {
+    const requestPermissions = async () => {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status !== "granted") {
+        alert("Las notificaciones están deshabilitadas.");
+      }
+    };
+    requestPermissions();
+    loadSessions();
+  }, []);
+
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+
+    if (isRunning && timeLeft > 0) {
+      timer = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
+      setBgColor(isWorkSession ? "#4CAF50" : "#008CBA"); // verde : estudio, azul = receso
+    } else if (timeLeft === 0) {
+      setIsRunning(false);
+      handleSessionEnd();
+    } else {
+      setBgColor("#FFD700"); // amarillo pausa o fondo principal
+    }
+
+    return () => clearInterval(timer);
+  }, [isRunning, timeLeft]);
+
+  // animacion de color de fondo(cambio)
+  const animatedStyle = useAnimatedStyle(() => ({
+    backgroundColor: withTiming(bgColor, { duration: 500 }),
+  }));
+
+  // obtencion de sonido de finalizacion de estudio || trabajo reemplaza al sonido de la notificacion desactivada
+  const playSound = async () => {
+    const { sound } = await Audio.Sound.createAsync(require("../../assets/sounds/alarm.mp3"));
+    await sound.playAsync();
+  };
+
+  // notificacion al terminar
+  const sendNotification = async (message: string) => {
+    await Notifications.scheduleNotificationAsync({
+      content: { title: "Pomodoro", body: message },
+      trigger: null,
+    });
+  };
+
+  // guardo el progreso en AsyncStorage(alamcenar datos de manera persitente y asincrono)
+  const saveSession = async () => {
+    const newSessions = sessionsCompleted + 1;
+    setSessionsCompleted(newSessions);
+    await AsyncStorage.setItem("sessions", newSessions.toString());
+  };
+
+  const saveBreak = async () => {
+    const newBreaks = breaksTaken + 1;
+    setBreaksTaken(newBreaks);
+    await AsyncStorage.setItem("breaks", newBreaks.toString());
+  };
+
+  // obtener progreso guardado
+  const loadSessions = async () => {
+    const savedSessions = await AsyncStorage.getItem("sessions");
+    if (savedSessions !== null) setSessionsCompleted(parseInt(savedSessions, 10));
+
+    const savedBreaks = await AsyncStorage.getItem("breaks");
+    if (savedBreaks !== null) setBreaksTaken(parseInt(savedBreaks, 10));
+  };
+
+  // manejo de fin de sesion
+  const handleSessionEnd = () => {
+    playSound();
+    sendNotification(isWorkSession ? "Tiempo de descanso! 🛑" : "Hora de estudiar! 💪"); // texto para la notificacion
+
+    if (isWorkSession) {
+      saveSession();
+      setTimeLeft(BREAK_TIME);
+    } else {
+      saveBreak();
+      setTimeLeft(WORK_TIME);
+    }
+
+    setIsWorkSession(!isWorkSession);
+    setIsRunning(false);
+  };
+
+  // reinicio del progreso
+  const resetProgress = async () => {
+    setSessionsCompleted(0);
+    setBreaksTaken(0);
+    await AsyncStorage.setItem("sessions", "0");
+    await AsyncStorage.setItem("breaks", "0");
+  };
+
+  // formatear tiempo en  minutos y segundos
+  const formatTime = (seconds: number) => {
+    const min = Math.floor(seconds / 60);
+    const sec = seconds % 60;
+    return `${String(min).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+  };
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12'
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-        <ThemedText>
-          Tap the Explore tab to learn more about what's included in this starter app.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          When you're ready, run{' '}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+    <Animated.View style={[styles.container, animatedStyle]}>
+
+      <Text style={styles.subtitle}>{isWorkSession ? "Trabajo" : "Descanso"}</Text>
+
+      <View style={styles.circle}>
+        <Text style={styles.timer}>{formatTime(timeLeft)}</Text>
+      </View>
+
+      <TouchableOpacity onPress={() => setIsRunning(!isRunning)} style={styles.button}>
+        <Text style={styles.buttonText}>{isRunning ? "Pausar" : "Iniciar"}</Text>
+      </TouchableOpacity>
+      <TouchableOpacity onPress={resetProgress} style={styles.resetButton}>
+        <Text style={styles.resetButtonText}>Reiniciar progreso</Text>
+      </TouchableOpacity>
+
+      <Text style={styles.sessions}>Pomodoros: {sessionsCompleted}</Text>
+      <Text style={styles.sessions}>Descansos: {breaksTaken}</Text>
+
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+  container: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  title: {
+    fontSize: 24,
+    fontWeight: "bold",
+    marginBottom: 10,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  subtitle: {
+    fontSize: 20,
+    fontWeight: "600",
+    marginBottom: 10,
+    color: "white",
+  },
+  circle: {
+    width: 150,
+    height: 150,
+    borderRadius: 75,
+    borderWidth: 4,
+    borderColor: "black",
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 200,
+    
+  },
+  timer: {
+    fontSize: 30,
+    fontWeight: "bold",
+  },
+  button: {
+    backgroundColor: "blue",
+    padding: 10,
+    borderRadius: 10,
+    marginTop: 10,
+    marginVertical:20,
+  },
+  buttonText: {
+    color: "white",
+    fontSize: 18,
+  },
+  sessions: {
+    fontSize: 18,
+    marginTop: 10,
+  },
+  resetButton: {
+    backgroundColor: "red",
+    padding: 8,
+    borderRadius: 10,
+    marginTop: 10,
+    marginVertical:10,
+  },
+  resetButtonText: {
+    color: "white",
+    fontSize: 14,
   },
 });
