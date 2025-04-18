@@ -1,11 +1,11 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Audio } from "expo-av";
+import BackgroundTimer from "expo-background-timer";
 
 export function usePomodoro() {
-  
-  const[WORKTIME,setWorkTime] = useState(1*60);
-  const[BREAKTIME,setBreakTime] = useState(1*60);
+  const [WORKTIME, setWorkTime] = useState(1 * 60);
+  const [BREAKTIME, setBreakTime] = useState(1 * 60);
 
   const [timeLeft, setTimeLeft] = useState(WORKTIME);
   const [isRunning, setIsRunning] = useState(false);
@@ -14,31 +14,60 @@ export function usePomodoro() {
   const [breaksTaken, setBreaksTaken] = useState(0);
   const [bgColor, setBgColor] = useState("#f4f4f4");
 
+  const intervalRef = useRef<number | null>(null);
+
+  // Configurar sonido en segundo plano
   useEffect(() => {
+    Audio.setAudioModeAsync({
+      staysActiveInBackground: true,
+      playsInSilentModeIOS: true,
+      shouldDuckAndroid: true,
+    });
+
     loadSessions();
   }, []);
 
   useEffect(() => {
-    let timer: NodeJS.Timeout;
-    if (isRunning && timeLeft > 0) {
-      timer = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
-      setBgColor(isWorkSession ? "#00FF00" : "#0033FF"); // verde = estudio, azul = descanso
-    } else if (timeLeft === 0) {
-      setIsRunning(false);
-      handleSessionEnd();
+    if (isRunning) {
+      startBackgroundTimer();
+      setBgColor(isWorkSession ? "#00FF00" : "#0033FF");
     } else {
-      setBgColor("#FFFF66"); // amarillo = pausa
+      stopBackgroundTimer();
+      setBgColor("#FFFF66");
     }
-    return () => clearInterval(timer);
-  }, [isRunning, timeLeft]);
+
+    return () => stopBackgroundTimer();
+  }, [isRunning]);
+
+  const startBackgroundTimer = () => {
+    if (intervalRef.current) return;
+
+    intervalRef.current = BackgroundTimer.bgSetInterval(() => {
+      setTimeLeft((prev) => {
+        if (prev <= 1) {
+          stopBackgroundTimer();
+          handleSessionEnd();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const stopBackgroundTimer = () => {
+    if (intervalRef.current) {
+      BackgroundTimer.bgClearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  };
 
   const handleSessionEnd = async () => {
-    playSound();
+    await playSound();
     if (isWorkSession) {
-      saveSession();
+      await saveSession();
       setTimeLeft(BREAKTIME);
     } else {
-      saveBreak();
+      await saveBreak();
       setTimeLeft(WORKTIME);
     }
     setIsWorkSession(!isWorkSession);
@@ -46,7 +75,9 @@ export function usePomodoro() {
   };
 
   const playSound = async () => {
-    const { sound } = await Audio.Sound.createAsync(require("../assets/sounds/alarm.mp3"));
+    const { sound } = await Audio.Sound.createAsync(
+      require("../assets/sounds/alarm.mp3")
+    );
     await sound.playAsync();
   };
 
